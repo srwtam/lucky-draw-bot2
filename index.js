@@ -106,6 +106,12 @@ app.post("/webhook", async (req, res) => {
 });
 
 // เริ่มเซิร์ฟเวอร์
-app.listen(process.env.PORT, () => {
-  console.log(`Server running on port ${process.env.PORT}`);
-});
+if (require.main === module) {
+  app.listen(process.env.PORT, () => {
+    console.log(`Server running on port ${process.env.PORT}`);
+  });
+}
+
+// สำหรับ Vercel
+module.exports = app;
+
