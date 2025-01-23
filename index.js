@@ -2,15 +2,18 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const axios = require("axios");
+const crypto = require("crypto"); // สำหรับคำนวณ signature
 
 const app = express();
 app.use(express.json());
 
+// เชื่อมต่อ MongoDB
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
 
+// สร้าง Schema สำหรับ User
 const UserSchema = new mongoose.Schema({
   lineId: String,
   hasPlayed: { type: Boolean, default: false },
@@ -19,6 +22,7 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.model("User", UserSchema);
 
+// ฟังก์ชันในการตอบกลับข้อความไปยัง LINE
 const replyMessage = async (replyToken, messages) => {
   await axios.post("https://api.line.me/v2/bot/message/reply", {
     replyToken,
@@ -28,7 +32,45 @@ const replyMessage = async (replyToken, messages) => {
   });
 };
 
+// 🎯 ฟังก์ชันสุ่มรางวัลแบบถ่วงน้ำหนัก
+const getRandomPrize = () => {
+  const prizes = [
+    { name: "🎉 รางวัลที่ 1 (ทองคำ)", weight: 1 },  
+    { name: "🎊 รางวัลที่ 2 (iPhone 15)", weight: 2 },
+    { name: "🎁 รางวัลที่ 3 (iPad)", weight: 3 },
+    { name: "🎮 รางวัลที่ 4 (PS5)", weight: 4 },
+    { name: "🎧 รางวัลที่ 5 (AirPods)", weight: 5 },
+    { name: "👜 รางวัลที่ 6 (กระเป๋าแบรนด์เนม)", weight: 6 },
+    { name: "🎟️ รางวัลที่ 7 (Gift Voucher 1000 บาท)", weight: 7 },
+    { name: "🍽️ รางวัลที่ 8 (บัตรรับประทานอาหารฟรี)", weight: 8 },
+    { name: "☕ รางวัลที่ 9 (บัตร Starbucks 500 บาท)", weight: 9 },
+    { name: "😢 ไม่ได้รับรางวัล", weight: 55 } // **ไม่ได้รางวัลมีโอกาสมากที่สุด**
+  ];
+
+  const weightedArray = prizes.flatMap((prize) => Array(prize.weight).fill(prize.name));
+  return weightedArray[Math.floor(Math.random() * weightedArray.length)];
+};
+
+// ฟังก์ชันตรวจสอบ signature จาก LINE API
+const verifySignature = (req) => {
+  const signature = req.headers["x-line-signature"]; // รับ signature จาก header
+  const body = JSON.stringify(req.body); // รับ request body
+
+  const hash = crypto
+    .createHmac("sha256", process.env.LINE_CHANNEL_SECRET)
+    .update(body)
+    .digest("base64");
+
+  return signature === hash; // เปรียบเทียบ signature ที่ LINE ส่งมาพร้อมกับที่คำนวณ
+};
+
+// Webhook endpoint
 app.post("/webhook", async (req, res) => {
+  // ตรวจสอบว่า request มาจาก LINE จริงหรือไม่
+  if (!verifySignature(req)) {
+    return res.status(400).send("Invalid signature");
+  }
+
   const event = req.body.events[0];
 
   if (event.type === "follow") {
@@ -51,9 +93,7 @@ app.post("/webhook", async (req, res) => {
 
     // ⏳ รอ 5 วินาทีก่อนแจ้งผล
     setTimeout(async () => {
-      const prizes = ["รางวัลที่ 1", "รางวัลที่ 2", "รางวัลที่ 3", "รางวัลที่ 4", "รางวัลที่ 5"];
-      const noPrize = "ไม่ได้รางวัล";
-      const prize = Math.random() < 0.5 ? prizes[Math.floor(Math.random() * prizes.length)] : noPrize;
+      const prize = getRandomPrize();
 
       const newUser = new User({ lineId, hasPlayed: true, prize });
       await newUser.save();
@@ -65,6 +105,7 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 });
 
+// เริ่มเซิร์ฟเวอร์
 app.listen(process.env.PORT, () => {
   console.log(`Server running on port ${process.env.PORT}`);
 });
